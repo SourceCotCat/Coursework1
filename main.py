@@ -32,3 +32,36 @@ def get_breeds() -> dict[str, list[str]]:
         logging.error("Возникла ошибка при получении списка пород.")
         return {}
     return response.json().get("message", {})
+
+
+def get_image(breed: str, subbreed: str | None = None) -> list[str]:
+    """ Получаем список изображений для пород/под-пород с dog.ceo.
+
+    param:
+        breed (str): Название породы собак 
+        subbreed: str | None = None
+    Returns: 
+        list[str]
+    """ 
+    images = []
+    breeds_d = get_breeds()
+
+    if subbreed is None:
+        response1 = requests.get(f"{dog_api_url}/breed/{breed}/images")
+        if response1.status_code == 200 or response1.json().get("status") == "success":
+            images.extend(response1.json().get("message", []))
+
+        if breed in breeds_d:
+            subbreeds = breeds_d.get(breed, [])
+            for sub in subbreeds:
+                response_sub = requests.get(f"{dog_api_url}/breed/{breed}/{sub}/images")
+                if response_sub.status_code == 200 or response_sub.json().get("status") == "success":
+                    images.extend(response_sub.json().get("message", []))
+
+    else:
+        br = f"{breed}/{subbreed}"
+        response2 = requests.get(f"{dog_api_url}/breed/{br}/images")
+        if response2.status_code == 200 or response2.json().get("status") == "success":
+            images.extend(response2.json().get("message", []))
+    
+    return images
