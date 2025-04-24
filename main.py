@@ -38,7 +38,7 @@ def get_image(breed: str, subbreed: str | None = None) -> list[str]:
     """ Получаем список изображений для пород/под-пород с dog.ceo.
 
     param:
-        breed (str): Название породы собак 
+        breed (str): Название породы собак.
         subbreed: str | None = None
     Returns: 
         list[str]
@@ -65,3 +65,27 @@ def get_image(breed: str, subbreed: str | None = None) -> list[str]:
             images.extend(response2.json().get("message", []))
     
     return images
+
+
+def download_image(url: str, breed: str, folder: str) -> str | None:
+    """ Скачиваем изображение по url и сохраняем локально.
+
+    param:
+        url (str): url-адрес изображения.
+        breed(str): Название породы.
+        folder(str): Путь к папке, в которую будет сохранено изображение.
+    Returns: 
+        str | None: имя файла при успешном сохранении, иначе None.
+    """ 
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        file_name = f"{breed}_{url.split('/')[-1]}"
+        file_p = os.path.join(folder, file_name)
+        with open(file_p, "wb") as file:
+            file.write(response.content)
+        return file_name
+    except Exception as e:
+        logging.error(f"Возникла ошибка при скачивании изображения {url}: {e}.")
+        return None
+
