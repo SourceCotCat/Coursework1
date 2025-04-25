@@ -132,7 +132,14 @@ def main():
         logging.error("Введено некорректное значение. Введите целое число или 'all'.")
         return
     
-    breed = input("Введите название породы: ").lower()
+    breed = input("Введите название породы(или '-' если знаете только подпороду): ").strip().lower()
+    subbreed = None
+    if breed == "-":
+        subbreed = input("Введите название подпороды: ").strip().lower()
+        if not subbreed:
+            logging.error('Название не может быть пустым.')
+            return
+
 
     if not yandex_disk_token:
         logging.error(f"Токен не найден. Проверьте файл .env.")
@@ -150,20 +157,27 @@ def main():
 
 
     all_breeds = get_breeds()
-    if breed not in all_breeds:
+
+    if subbreed:
         for main_br, subbreeds in all_breeds.items():
-            if breed in subbreeds:
-                logging.info(f"Подпорода {breed} не найдена в породе {main_br}.")
+            if subbreed in subbreeds:
                 breed = main_br
+                logging.info(f"Подпорода {subbreed} не найдена в породе {main_br}.")
                 break
         else:
-            logging.error(f"Порода {breed} не найдена.")
+            logging.error(f"Подпорода {subbreed} не найдена.")
             return
 
+    elif breed not in all_breeds:
+        logging.error(f"Порода {breed} не найдена.")
+        return
 
     res = []
     subbre = all_breeds.get(breed, [])
-    breed_sub =[f"{breed}/{subbreed}" for subbreed in subbre] if subbre else [breed]
+    if subbreed:
+        breed_sub = [f"{breed}/{subbreed}"]
+    else:   
+        breed_sub =[f"{breed}/{subbreed}" for subbreed in subbre] if subbre else [breed]
 
     # папки с породами 
     folder_p = os.path.join(images, breed)
