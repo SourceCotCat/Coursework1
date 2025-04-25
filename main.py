@@ -8,7 +8,7 @@ from yadisk import YaDisk
 
 dog_api_url = 'https://dog.ceo/api'
 images = "images"
-json_file = "result.json"
+json_file = "results.json"
 
 
 load_dotenv() # получаем переменную окружения 
