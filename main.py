@@ -147,36 +147,32 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
     """ Скачивание, сохранение, загрузка"""
 
     if subbreed:
-        # Если выбрана конкретная подпорода
         folder_p = os.path.join(images, breed, subbreed)
-        os.makedirs(folder_p, exist_ok=True)
         breed_sub = [f"{breed}/{subbreed}"]
     else:
-        # Если выбраны все подпороды (или их нет)
         folder_p = os.path.join(images, breed)
-        os.makedirs(folder_p, exist_ok=True)
-        if subbreeds:
-            breed_sub = [f"{breed}/{s}" for s in subbreeds]
-        else:
-            breed_sub = [breed]
+        breed_sub = [f"{breed}/{s}" for s in subbreeds] if subbreeds else [breed]
+    
+    os.makedirs(folder_p, exist_ok=True)
     res = []
+
+    # Скачиваем изображения
     for bre in breed_sub:
         main_breed, *sub_part = bre.split("/")
         sub = sub_part[0] if sub_part else None
-        # Получаем URL изображений
+        
         image_urls = get_image(main_breed, sub)
         if not image_urls:
             logging.warning(f"Изображения для {bre} не найдены")
             continue
+            
         if cnt:
             image_urls = image_urls[:cnt]
-        # Путь к папке для текущей подпороды
-        if sub:
-            current_folder = os.path.join(images, main_breed, sub)
-        else:
-            current_folder = os.path.join(images, main_breed)
+
+        current_folder = os.path.join(images, main_breed, sub) if sub else os.path.join(images, main_breed)
         os.makedirs(current_folder, exist_ok=True)
-        for url in tqdm(image_urls, desc=f"Скачивание изображений для {bre}"):
+
+        for url in tqdm(image_urls, desc=f"Скачивание {bre}"):
             file_name = download_image(url, main_breed, current_folder)
             if file_name:
                 res.append({
@@ -185,24 +181,53 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
                     "subbreed": sub,
                     "url": url
                 })
-    # Сохраняем JSON
-    json_f_p = os.path.join(os.getcwd(), json_file)
-    with open(json_f_p, "w", encoding="utf-8") as f:
+
+    # Сохраняем данные в JSON
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=4, ensure_ascii=False)
-    logging.info(f"Результат сохранен в {json_f_p}.")
-    # Загружаем файлы с сохранением структуры папок
-    for root, dirs, files in os.walk(images):  # начинаем с корня images
-        relative_path = os.path.relpath(root, images)  # относительный путь от images
-        remote_dir = os.path.join("/", breed, relative_path)  # удалённый путь с добавлением породы
+    logging.info(f"Обновлен файл Json -> {json_file}")
+
+    # Создаем структуру папок на Яндекс.Диске перед загрузкой
+    remote_base_path = f"/{breed}"
+    try:
+        y_disk.mkdir(remote_base_path)
+    except Exception as e:
+        if "existent directory" not in str(e):
+            logging.error(f"Ошибка создания базовой папки {remote_base_path}: {e}")
+
+    if subbreeds and not subbreed:
+        for s in subbreeds:
+            remote_path = f"/{breed}/{s}"
+            try:
+                y_disk.mkdir(remote_path)
+            except Exception as e:
+                if "existent directory" not in str(e):
+                    logging.error(f"Ошибка создания подпапки {remote_path}: {e}")
+
+    # Загружаем файлы с проверкой структуры
+    for item in res:
+        remote_dir = f"/{item['breed']}"
+        if item['subbreed']:
+            remote_dir += f"/{item['subbreed']}"
+            
+        local_path = os.path.join(images, item['breed'], 
+                                item['subbreed'] if item['subbreed'] else "", 
+                                item['file_name'])
+        
+        remote_path = f"{remote_dir}/{item['file_name']}"
+
         try:
-            y_disk.mkdir(remote_dir, parents=True)  # Создаем папку на Яндекс.Диске
+            # Двойная проверка существования папки
+            try:
+                y_disk.mkdir(remote_dir, parents=True)
+            except Exception as e:
+                if "existent directory" not in str(e):
+                    raise e
+            
+            y_disk.upload(local_path, remote_path, overwrite=True)
+            logging.info(f"Успешно: {local_path} -> {remote_path}")
         except Exception as e:
-            pass  # если папка уже существует
-        for file in files:
-            local_file = os.path.join(root, file)
-            remote_file = os.path.join(remote_dir, file)  # Путь к файлу на Яндекс.Диске
-            upload_on_disk(y_disk, local_file, remote_file)
-            logging.info(f"Загружен файл: {local_file} -> {remote_file}")
+            logging.error(f"Ошибка загрузки {local_path}: {str(e)}")
 
 
 def main():
