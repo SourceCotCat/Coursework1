@@ -3,10 +3,12 @@ import requests
 import json
 import logging
 import random
+import shutil
 from tqdm import tqdm
 from dotenv import load_dotenv
 from yadisk import YaDisk
 
+# Наши константы 
 dog_api_url = 'https://dog.ceo/api'
 images = "images"
 json_file = "results.json"
@@ -14,6 +16,35 @@ json_file = "results.json"
 
 # настройка вывода логов
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+
+def clear_f():
+    """ Очищаем папки JSON и Images """
+    сhoice = input(f"Хотите очистить содержимое папки 'images' и файла 'results.json'?\n"
+                   f"Введите 'yes' для подтверждения, иначе Enter: "
+                   ).strip().lower()
+    
+    if сhoice == "yes":
+        # Очищаем Images
+        if os.path.exists(images): # проверяем сущ-ие указанного пути
+            try:
+                for folder_name in os.listdir(images):
+                    folder_path = os.path.join(images, folder_name)
+                    if os.path.isdir(folder_path): 
+                        shutil.rmtree(folder_path)
+                        logging.info(f"Папка '{folder_path}' и ее содержимое удалено")
+            except Exception as e:
+                logging.error(f"Ошибка при удалении папок в  {images}: {e}")
+        else:
+            logging.warning(f"Папка '{images}' не существует.")
+
+        # Очищаем JSON
+        if os.path.exists(json_file): # проверяем сущ-ие указанного пути\
+            with open(json_file, "w", encoding="utf-8") as f:
+                    f.truncate()
+            logging.info(f"Файл '{json_file}' очищен.")
+        else:
+            logging.warning(f"Файл '{json_file}' не найден.") 
 
 
 def get_breeds() -> dict[str, list[str]]:
@@ -85,7 +116,7 @@ def download_image(url: str, breed: str, folder: str) -> str | None:
         logging.error(f"Возникла ошибка при скачивании изображения {url}: {e}.")
         return None
 
-def upload_on_disk(ya_disk, local_path, remote_path):
+def upload_on_disk(ya_disk: YaDisk, local_path: str, remote_path: str):
     """ Загружаем файл на диск.
 
     Args:
@@ -97,17 +128,88 @@ def upload_on_disk(ya_disk, local_path, remote_path):
     """ 
     if not os.path.exists(local_path):
         logging.error(f"Файл {local_path} не найден")
+        return
+    
+    remote_dir = os.path.dirname(remote_path)
+    try:
+        ya_disk.mkdir(remote_dir, parents=True)
+    except Exception as e:
+        pass
 
     try:
-        ya_disk.upload(local_path, remote_path)
+        ya_disk.upload(local_path, remote_path, overwrite=True)
         logging.info(f"Файл {local_path} успешно загружен на диск.")
     except Exception as e:
         logging.error(f"Возникла ошибка при загрузке файла {local_path} на диск.")
 
+
+def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
+    """ Скачивание, сохранение, загрузка"""
+
+    if subbreed:
+        # Если выбрана конкретная подпорода
+        folder_p = os.path.join(images, breed, subbreed)
+        os.makedirs(folder_p, exist_ok=True)
+        breed_sub = [f"{breed}/{subbreed}"]
+    else:
+        # Если выбраны все подпороды (или их нет)
+        folder_p = os.path.join(images, breed)
+        os.makedirs(folder_p, exist_ok=True)
+        if subbreeds:
+            breed_sub = [f"{breed}/{s}" for s in subbreeds]
+        else:
+            breed_sub = [breed]
+    res = []
+    for bre in breed_sub:
+        main_breed, *sub_part = bre.split("/")
+        sub = sub_part[0] if sub_part else None
+        # Получаем URL изображений
+        image_urls = get_image(main_breed, sub)
+        if not image_urls:
+            logging.warning(f"Изображения для {bre} не найдены")
+            continue
+        if cnt:
+            image_urls = image_urls[:cnt]
+        # Путь к папке для текущей подпороды
+        if sub:
+            current_folder = os.path.join(images, main_breed, sub)
+        else:
+            current_folder = os.path.join(images, main_breed)
+        os.makedirs(current_folder, exist_ok=True)
+        for url in tqdm(image_urls, desc=f"Скачивание изображений для {bre}"):
+            file_name = download_image(url, main_breed, current_folder)
+            if file_name:
+                res.append({
+                    "file_name": file_name,
+                    "breed": main_breed,
+                    "subbreed": sub,
+                    "url": url
+                })
+    # Сохраняем JSON
+    json_f_p = os.path.join(os.getcwd(), json_file)
+    with open(json_f_p, "w", encoding="utf-8") as f:
+        json.dump(res, f, indent=4, ensure_ascii=False)
+    logging.info(f"Результат сохранен в {json_f_p}.")
+    # Загружаем файлы с сохранением структуры папок
+    for root, dirs, files in os.walk(images):  # начинаем с корня images
+        relative_path = os.path.relpath(root, images)  # относительный путь от images
+        remote_dir = os.path.join("/", breed, relative_path)  # удалённый путь с добавлением породы
+        try:
+            y_disk.mkdir(remote_dir, parents=True)  # Создаем папку на Яндекс.Диске
+        except Exception as e:
+            pass  # если папка уже существует
+        for file in files:
+            local_file = os.path.join(root, file)
+            remote_file = os.path.join(remote_dir, file)  # Путь к файлу на Яндекс.Диске
+            upload_on_disk(y_disk, local_file, remote_file)
+            logging.info(f"Загружен файл: {local_file} -> {remote_file}")
+
+
 def main():
     """ 
+    Удалаем/очищаем папку 'images' и файл 'results.json в случае необходимости.
     Получаем от пользователя кол-во изображений и название породы(подпороды).
-    Проверяет наличие яндекс токена.
+    Проверяем наличие яндекс токена.
     Получаем список пород(подпород) с Api.
     Скачиваем изображения и сохраняем локально.
     Загружаем изображения на диск.
@@ -116,7 +218,8 @@ def main():
     Returns:
         None
     """ 
-    
+    clear_f()
+
     def get_user_input_cnt() -> int | None:
         try:
             cnt_input = input("Введите кол-во изображений для скачивания(или 'all' для всех): ").strip().lower()
@@ -124,7 +227,7 @@ def main():
                 return None
             
             cnt = int(cnt_input)
-            if cnt < 0:
+            if cnt <= 0:
                 logging.error("Количество изображений должно быть больше 0")
                 return None
             
@@ -135,18 +238,27 @@ def main():
             return None
     
 
-    def get_users_breed_subreed() -> tuple[str | None, str | None]:
+    def get_users_breed_subreed() -> tuple[str | None, list[str] | None, str | None]:
 
         breed = input("Введите название породы(или '-' если знаете только подпороду): ").strip().lower()
         subbreed = None
+        subbreeds = None
 
         if breed == "-":
             subbreed = input("Введите название подпороды: ").strip().lower()
             if not subbreed:
                 logging.error('Название подпороды не может быть пустым.')
-                return None, None
-
-        return breed, subbreed
+                return None, None, None
+        else:
+            # получаем список подпород для введеной порды
+            breeds_sub = get_breeds()
+            if breed in breeds_sub:
+                subbreeds = breeds_sub.get(breed, [])
+            else:
+                logging.error(f"Порода '{breed}' не найдена")
+                return None, None, None
+           
+        return breed, subbreeds, subbreed
 
 
     def check_token() -> YaDisk | None:
@@ -157,8 +269,6 @@ def main():
         if not yandex_disk_token:
             logging.error(f"Токен не найден. Проверьте файл .env.")
             return None
-
-
         y_disk = YaDisk(token=yandex_disk_token)
         try:
             if not y_disk.check_token():
@@ -197,58 +307,13 @@ def main():
 
         return breed
 
-    def proc_image(breed: str, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
-        all_breeds = get_breeds()
-        subbreeds = all_breeds.get(breed, [])
-        if subbreed:
-            breed_sub = [f"{breed}/{subbreed}"]
-        else:   
-            breed_sub =[f"{breed}/{subbreed}" for subbreed in subbreeds] if subbreeds else [breed]
-
-        folder_p = os.path.join(images, breed)
-        os.makedirs(folder_p, exist_ok=True)
-
-
-        res = []
-        for bre in breed_sub:
-            image_urls = get_image(*bre.split("/"))
-            if not image_urls:
-                logging.warning(f"изображения для {bre} не найдены")
-                continue
-
-
-            if cnt is not None:
-                image_urls = image_urls[:cnt]
-
-            for url in tqdm(image_urls, desc=f"Скачивание изображений для {bre}"):
-                file_name = download_image(url, breed, folder_p)
-                if file_name:
-                    res.append({"file_name": file_name})
-        
-
-        remote_folder = os.path.join("/", breed)
-        try:
-            y_disk.mkdir(remote_folder)
-        except Exception as e:
-            logging.warning(f"Папка {remote_folder} уже существует на диске.")
-
-
-        for file_name in os.listdir(folder_p):
-            local_path = os.path.join(folder_p, file_name)
-            remote_path = os.path.join(remote_folder, file_name)
-            upload_on_disk(y_disk, local_path, remote_path)
-        
-
-        json_f_p = os.path.join(os.getcwd(), json_file)
-        with open(json_f_p, "w") as f:
-            json.dump(res, f, indent=4)
-        logging.info(f"Результат сохранен в {json_f_p}.")
+  
 
     cnt = get_user_input_cnt()
     if cnt is None:
         return 
     
-    breed, subbreed = get_users_breed_subreed()
+    breed, subbreeds, subbreed = get_users_breed_subreed()
     if not breed and not subbreed:
         return
 
@@ -262,7 +327,8 @@ def main():
         logging.error("Порода не найдена.")
         return 
     
-    proc_image(breed, subbreed, cnt, y_disk)
+    proc_image(breed, subbreeds, subbreed, cnt, y_disk)
 
 if __name__ == "__main__":
     main()
+
