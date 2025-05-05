@@ -229,6 +229,29 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
         except Exception as e:
             logging.error(f"Ошибка загрузки {local_path}: {str(e)}")
 
+def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> str | None:
+    matching = [main_br for main_br, subbreeds in all_breeds.items() if subbreed in subbreeds]
+    if not matching:
+        logging.error(f"Подпорода {subbreed} не найдена.")
+        return None
+    if len(matching) > 1:
+        print("Найдены следующие подпороды:")
+        for i, el in enumerate(matching, start=1):
+            print(f"{i}. {el}")
+        choice = input("Выберите номер породы(или введите '-' для случайного выбора): ").strip()
+        if choice == '-':
+            breed = random.choice(matching)
+            logging.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
+        elif choice.isdigit() and 1 <= int(choice) <= len(matching):
+            breed = matching[int(choice) - 1]
+            logging.info(f"Выбрана порода '{breed}' для подпороды '{subbreed}'.")
+        else:
+            logging.error('Ошибка выбора')
+            return None
+    else:
+        breed = matching[0]
+        logging.info(f"Подпорода '{subbreed}' найдена в породе '{breed}.")
+    return breed
 
 def main():
     """ 
@@ -303,36 +326,6 @@ def main():
         except Exception as e:
             logging.error(f"Ошибка при проверке токена: {e}")
             return None
-
-    def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> str | None:
-
-        matching = [main_br for main_br, subbreeds in all_breeds.items() if subbreed in subbreeds]
-        if not matching:
-            logging.error(f"Подпорода {subbreed} не найдена.")
-            return None
-
-        if len(matching) > 1:
-            print("Найдены следующие подпороды:")
-            for i, el in enumerate(matching, start=1):
-                print(f"{i}. {el}")
-            choice = input("Выберите номер породы(или введите '-' для случайного выбора): ").strip()
-            if choice == '-':
-                breed = random.choice(matching)
-                logging.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
-            elif choice.isdigit() and 1 <= int(choice) <= len(matching):
-                breed = matching[int(choice) - 1]
-                logging.info(f"Выбрана порода '{breed}' для подпороды '{subbreed}'.")
-            else:
-                logging.error('Ошибка выбора')
-                return None
-
-        else:
-            breed = matching[0]
-            logging.info(f"Подпорода '{subbreed}' найдена в породе '{breed}.")
-
-        return breed
-
-  
 
     cnt = get_user_input_cnt()
     if cnt is None:
