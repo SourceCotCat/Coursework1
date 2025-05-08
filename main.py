@@ -7,12 +7,17 @@ import shutil
 from tqdm import tqdm
 from dotenv import load_dotenv
 from yadisk import YaDisk
+from yadisk.exceptions import DirectoryExistsError
+import io
+from io import BytesIO
 
 # Наши константы 
 dog_api_url = 'https://dog.ceo/api'
 images = "images"
 json_file = "results.json"
 
+yadisk_logger = logging.getLogger("yadisk")
+yadisk_logger.setLevel(logging.WARNING)
 
 # настройка вывода логов
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -94,140 +99,107 @@ def get_image(breed: str, subbreed: str | None = None) -> list[str]:
     return images
 
 
-def download_image(url: str, breed: str, folder: str) -> str | None:
-    """ Скачиваем изображение по url и сохраняем локально.
-
-    param:
-        url (str): url-адрес изображения.
-        breed(str): Название породы.
-        folder(str): Путь к папке, в которую будет сохранено изображение.
-    Returns: 
-        str | None: имя файла при успешном сохранении, иначе None.
-    """ 
+def download_image(url: str, breed: str) -> tuple[str, BytesIO] | None:
+    """ Скачиваем изображение по url и возвращаем его имя и содержимое в виде BytesIO """
     try:
         response = requests.get(url)
         response.raise_for_status()
         file_name = f"{breed}_{url.split('/')[-1]}"
-        file_p = os.path.join(folder, file_name)
-        with open(file_p, "wb") as file:
-            file.write(response.content)
-        return file_name
+        image_data = BytesIO(response.content)
+        return file_name, image_data
     except Exception as e:
-        logging.error(f"Возникла ошибка при скачивании изображения {url}: {e}.")
+        logging.error(f"Ошибка при скачивании изображения {url}: {e}")
         return None
 
-def upload_on_disk(ya_disk: YaDisk, local_path: str, remote_path: str):
-    """ Загружаем файл на диск.
 
-    Args:
-        ya_disk (Yadisk): Объект Yadisk для работы с Api.
-        local_path(str): Локальный путь к файлу.
-        remote_path(str): Удаленный путь для сохранения файла .
-    Returns: 
-        None
-    """ 
-    if not os.path.exists(local_path):
-        logging.error(f"Файл {local_path} не найден")
-        return
-    
-    remote_dir = os.path.dirname(remote_path)
-    try:
-        ya_disk.mkdir(remote_dir, parents=True)
-    except Exception as e:
-        pass
+def ensure_remote_path_exists(ya_disk: YaDisk, remote_path: str):
+    """
+    Рекурсивно создаёт все папки по указанному пути на Яндекс.Диске.
+    """
+    path_parts = remote_path.strip("/").split("/")
+    current_path = ""
+    for part in path_parts:
+        current_path += f"/{part}"
+        try:
+            ya_disk.mkdir(current_path)
+        except DirectoryExistsError:
+            pass
+        except Exception as e:
+            if "Directory already exists" not in str(e):
+                logging.error(f"Ошибка при создании папки {current_path}: {e}")
 
+
+def upload_on_disk(ya_disk: YaDisk, image_data: BytesIO, remote_path: str):
+    """ Загружает изображение из памяти (BytesIO) на Яндекс.Диск """
     try:
-        ya_disk.upload(local_path, remote_path, overwrite=True)
-        logging.info(f"Файл {local_path} успешно загружен на диск.")
+        ya_disk.upload(image_data, remote_path)
+        # logging.info(f"Файл успешно загружен на диск: {remote_path}")
     except Exception as e:
-        logging.error(f"Возникла ошибка при загрузке файла {local_path} на диск.")
+        logging.error(f"Ошибка при загрузке файла на Яндекс.Диск: {e}")
 
 
 def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
-    """ Скачивание, сохранение, загрузка"""
-
+    res = []
+    
     if subbreed:
-        folder_p = os.path.join(images, breed, subbreed)
         breed_sub = [f"{breed}/{subbreed}"]
     else:
-        folder_p = os.path.join(images, breed)
         breed_sub = [f"{breed}/{s}" for s in subbreeds] if subbreeds else [breed]
-    
-    os.makedirs(folder_p, exist_ok=True)
-    res = []
 
-    # Скачиваем изображения
+    # Скачиваем изображения и сразу грузим на диск
     for bre in breed_sub:
         main_breed, *sub_part = bre.split("/")
         sub = sub_part[0] if sub_part else None
-        
         image_urls = get_image(main_breed, sub)
+
         if not image_urls:
             logging.warning(f"Изображения для {bre} не найдены")
             continue
-            
+
         if cnt:
             image_urls = image_urls[:cnt]
 
-        current_folder = os.path.join(images, main_breed, sub) if sub else os.path.join(images, main_breed)
-        os.makedirs(current_folder, exist_ok=True)
+
+        remote_dir = f"/{main_breed}"
+        if sub:
+            remote_dir += f"/{sub}"
+        # Создаём структуру папок на Яндекс.Диске
+        try:
+            ensure_remote_path_exists(y_disk, remote_dir)
+        except Exception as e:
+            if "existent directory" not in str(e):
+                logging.error(f"Ошибка создания папки {remote_dir}: {e}")
+
+
 
         for url in tqdm(image_urls, desc=f"Скачивание {bre}"):
-            file_name = download_image(url, main_breed, current_folder)
-            if file_name:
-                res.append({
-                    "file_name": file_name,
-                    "breed": main_breed,
-                    "subbreed": sub,
-                    "url": url
-                })
+            downloaded = download_image(url, main_breed)
+            if downloaded is None:
+                continue
 
-    # Сохраняем данные в JSON
+            file_name, image_data = downloaded
+
+
+            remote_path = f"{remote_dir}/{file_name}"
+
+
+
+            # Загружаем напрямую из памяти
+            image_data.seek(0)  # Важно! Перематываем поток в начало
+            upload_on_disk(y_disk, image_data, remote_path)
+
+            # Сохраняем информацию о файле
+            res.append({
+                "file_name": file_name,
+                "breed": main_breed,
+                "subbreed": sub,
+                "url": url
+            })
+
+    # Сохраняем метаданные в JSON
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=4, ensure_ascii=False)
     logging.info(f"Обновлен файл Json -> {json_file}")
-
-    # Создаем структуру папок на Яндекс.Диске перед загрузкой
-    remote_base_path = f"/{breed}"
-    try:
-        y_disk.mkdir(remote_base_path)
-    except Exception as e:
-        if "existent directory" not in str(e):
-            logging.error(f"Ошибка создания базовой папки {remote_base_path}: {e}")
-
-    if subbreeds and not subbreed:
-        for s in subbreeds:
-            remote_path = f"/{breed}/{s}"
-            try:
-                y_disk.mkdir(remote_path)
-            except Exception as e:
-                if "existent directory" not in str(e):
-                    logging.error(f"Ошибка создания подпапки {remote_path}: {e}")
-
-    # Загружаем файлы с проверкой структуры
-    for item in res:
-        remote_dir = f"/{item['breed']}"
-        if item['subbreed']:
-            remote_dir += f"/{item['subbreed']}"
-            
-        local_path = os.path.join(images, item['breed'], 
-                                item['subbreed'] if item['subbreed'] else "", 
-                                item['file_name'])
-        
-        remote_path = f"{remote_dir}/{item['file_name']}"
-
-        try:
-            # Двойная проверка существования папки
-            try:
-                y_disk.mkdir(remote_dir, parents=True)
-            except Exception as e:
-                if "existent directory" not in str(e):
-                    raise e
-            
-            y_disk.upload(local_path, remote_path, overwrite=True)
-            logging.info(f"Успешно: {local_path} -> {remote_path}")
-        except Exception as e:
-            logging.error(f"Ошибка загрузки {local_path}: {str(e)}")
 
 def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> str | None:
     matching = [main_br for main_br, subbreeds in all_breeds.items() if subbreed in subbreeds]
