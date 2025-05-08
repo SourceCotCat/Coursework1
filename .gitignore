@@ -10,3 +10,4 @@ __pycache__/
 # виртуальное окружение
 venv/ 
 env/
+main2.py
