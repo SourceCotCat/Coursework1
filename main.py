@@ -3,7 +3,6 @@ import requests
 import json
 import logging
 import random
-import shutil
 from tqdm import tqdm
 from dotenv import load_dotenv
 from yadisk import YaDisk
@@ -25,24 +24,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 def clear_f():
     """ Очищаем папки JSON и Images """
-    сhoice = input(f"Хотите очистить содержимое папки 'images' и файла 'results.json'?\n"
+    сhoice = input(f"Хотите очистить содержимое файла 'results.json'?\n"
                    f"Введите 'yes' для подтверждения, иначе Enter: "
                    ).strip().lower()
     
     if сhoice == "yes":
-        # Очищаем Images
-        if os.path.exists(images): # проверяем сущ-ие указанного пути
-            try:
-                for folder_name in os.listdir(images):
-                    folder_path = os.path.join(images, folder_name)
-                    if os.path.isdir(folder_path): 
-                        shutil.rmtree(folder_path)
-                        logging.info(f"Папка '{folder_path}' и ее содержимое удалено")
-            except Exception as e:
-                logging.error(f"Ошибка при удалении папок в  {images}: {e}")
-        else:
-            logging.warning(f"Папка '{images}' не существует.")
-
         # Очищаем JSON
         if os.path.exists(json_file): # проверяем сущ-ие указанного пути\
             with open(json_file, "w", encoding="utf-8") as f:
@@ -139,6 +125,7 @@ def upload_on_disk(ya_disk: YaDisk, image_data: BytesIO, remote_path: str):
 
 
 def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
+    
     res = []
     
     if subbreed:
@@ -178,11 +165,7 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
                 continue
 
             file_name, image_data = downloaded
-
-
             remote_path = f"{remote_dir}/{file_name}"
-
-
 
             # Загружаем напрямую из памяти
             image_data.seek(0)  # Важно! Перематываем поток в начало
