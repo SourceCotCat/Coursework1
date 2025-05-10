@@ -1,26 +1,22 @@
 import os
-import requests
 import json
-import logging
 import random
 from tqdm import tqdm
-from dotenv import load_dotenv
 from yadisk import YaDisk
-from yadisk.exceptions import DirectoryExistsError
-import io
-from io import BytesIO
 
-# Наши константы 
-dog_api_url = 'https://dog.ceo/api'
+from dotenv import load_dotenv
+from utils.downloader import get_breeds, get_image, download_image
+from utils.uploader import ensure_remote_path_exists, upload_on_disk
+from utils.logger import get_log, setup_log
+
+# константы 
+dog_api_url = 'https://dog.ceo/api'   
 images = "images"
 json_file = "results.json"
 
-yadisk_logger = logging.getLogger("yadisk")
-yadisk_logger.setLevel(logging.WARNING)
-
-# настройка вывода логов
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
+# настраиваем логирование
+setup_log()
+logger = get_log(__name__)
 
 def clear_f():
     """ Очищаем папку JSON"""
@@ -30,98 +26,12 @@ def clear_f():
     
     if choice == "yes":
         # Очищаем JSON
-        if os.path.exists(json_file): # проверяем сущ-ие указанного пути\
+        if os.path.exists(json_file): # проверяем сущ-ие указанного пути
             with open(json_file, "w", encoding="utf-8") as f:
                     f.truncate()
-            logging.info(f"Файл '{json_file}' очищен.")
+            logger.info(f"Файл '{json_file}' очищен.")
         else:
-            logging.warning(f"Файл '{json_file}' не найден.") 
-
-
-def get_breeds() -> dict[str, list[str]]:
-    """ Получаем список пород/под-пород с dog.ceo.
-
-    Возвращает словарь, где ключами являются названия пород, а значениями - списки под-пород.
-    Если не получилось сделать запрос, возвращает пустой словарь.
-
-    Returns: Dict 
-    Raises: Exception
-    """ 
-    response = requests.get(f"{dog_api_url}/breeds/list/all")
-    if response.status_code != 200 or response.json().get("status") != "success":
-        logging.error("Возникла ошибка при получении списка пород.")
-        return {}
-    return response.json().get("message", {})
-
-
-def get_image(breed: str, subbreed: str | None = None) -> list[str]:
-    """ Получаем список изображений для пород/под-пород с dog.ceo.
-    Args: 
-        breed (str): Название породы.
-        subbreed (str | None): Название подпороды.
-    Returns: list[str]: Список url-адресов изображений.
-    """ 
-    images = []
-    breeds_d = get_breeds()
-
-    if subbreed is None:
-        response1 = requests.get(f"{dog_api_url}/breed/{breed}/images")
-        if response1.status_code == 200 and response1.json().get("status") == "success":
-            images.extend(response1.json().get("message", []))
-
-        if breed in breeds_d:
-            subbreeds = breeds_d.get(breed, [])
-            for sub in subbreeds:
-                response_sub = requests.get(f"{dog_api_url}/breed/{breed}/{sub}/images")
-                if response_sub.status_code == 200 and response_sub.json().get("status") == "success":
-                    images.extend(response_sub.json().get("message", []))
-
-    else:
-        br = f"{breed}/{subbreed}"
-        response2 = requests.get(f"{dog_api_url}/breed/{br}/images")
-        if response2.status_code == 200 and response2.json().get("status") == "success":
-            images.extend(response2.json().get("message", []))
-    
-    return images
-
-
-def download_image(url: str, breed: str) -> tuple[str, BytesIO] | None:
-    """ Скачиваем изображение по url и возвращаем его имя и содержимое в виде BytesIO """
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        file_name = f"{breed}_{url.split('/')[-1]}"
-        image_data = BytesIO(response.content)
-        return file_name, image_data
-    except Exception as e:
-        logging.error(f"Ошибка при скачивании изображения {url}: {e}")
-        return None
-
-
-def ensure_remote_path_exists(ya_disk: YaDisk, remote_path: str):
-    """
-    Рекурсивно создаёт все папки по указанному пути на Яндекс.Диске.
-    """
-    path_parts = remote_path.strip("/").split("/")
-    current_path = ""
-    for part in path_parts:
-        current_path += f"/{part}"
-        try:
-            ya_disk.mkdir(current_path)
-        except DirectoryExistsError:
-            pass
-        except Exception as e:
-            if "Directory already exists" not in str(e):
-                logging.error(f"Ошибка при создании папки {current_path}: {e}")
-
-
-def upload_on_disk(ya_disk: YaDisk, image_data: BytesIO, remote_path: str):
-    """ Загружает изображение из памяти (BytesIO) на Яндекс.Диск """
-    try:
-        ya_disk.upload(image_data, remote_path)
-        # logging.info(f"Файл успешно загружен на диск: {remote_path}")
-    except Exception as e:
-        logging.error(f"Ошибка при загрузке файла на Яндекс.Диск: {e}")
+            logger.warning(f"Файл '{json_file}' не найден.") 
 
 
 def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
@@ -140,7 +50,7 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
         image_urls = get_image(main_breed, sub)
 
         if not image_urls:
-            logging.warning(f"Изображения для {bre} не найдены")
+            logger.warning(f"Изображения для {bre} не найдены")
             continue
 
         if cnt:
@@ -155,7 +65,7 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
             ensure_remote_path_exists(y_disk, remote_dir)
         except Exception as e:
             if "existent directory" not in str(e):
-                logging.error(f"Ошибка создания папки {remote_dir}: {e}")
+                logger.error(f"Ошибка создания папки {remote_dir}: {e}")
 
 
 
@@ -182,12 +92,12 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
     # Сохраняем метаданные в JSON
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(res, f, indent=4, ensure_ascii=False)
-    logging.info(f"Обновлен файл Json -> {json_file}")
+    logger.info(f"Обновлен файл Json -> {json_file}")
 
 def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> str | None:
     matching = [main_br for main_br, subbreeds in all_breeds.items() if subbreed in subbreeds]
     if not matching:
-        logging.error(f"Под порода {subbreed} не найдена.")
+        logger.error(f"Под порода {subbreed} не найдена.")
         return None
     if len(matching) > 1:
         print("Найдены следующие подпороды:")
@@ -196,25 +106,24 @@ def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> s
         choice = input("Выберите номер породы(или введите '-' для случайного выбора): ").strip()
         if choice == '-':
             breed = random.choice(matching)
-            logging.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
+            logger.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
         elif choice.isdigit() and 1 <= int(choice) <= len(matching):
             breed = matching[int(choice) - 1]
-            logging.info(f"Выбрана порода '{breed}' для подпороды '{subbreed}'.")
+            logger.info(f"Выбрана порода '{breed}' для подпороды '{subbreed}'.")
         else:
-            logging.error('Ошибка выбора')
+            logger.error('Ошибка выбора')
             return None
     else:
         breed = matching[0]
-        logging.info(f"Подпорода '{subbreed}' найдена в породе '{breed}.")
+        logger.info(f"Подпорода '{subbreed}' найдена в породе '{breed}.")
     return breed
 
 def main():
     """ 
-    Удаляем/очищаем папку 'images' и файл 'results.json в случае необходимости.
+    очищаем файл 'results.json в случае необходимости.
     Получаем от пользователя кол-во изображений и название породы(подпороды).
     Проверяем наличие яндекс токена.
     Получаем список пород(подпород) с Api.
-    Скачиваем изображения и сохраняем локально.
     Загружаем изображения на диск.
     Сохраняем информацию в Json.
 
@@ -231,13 +140,13 @@ def main():
             
             cnt = int(cnt_input)
             if cnt <= 0:
-                logging.error("Количество изображений должно быть больше 0")
+                logger.error("Количество изображений должно быть больше 0")
                 return None
             
             return cnt
         
         except ValueError:
-            logging.error("Введено некорректное значение. Введите целое число или 'all'.")
+            logger.error("Введено некорректное значение. Введите целое число или 'all'.")
             return None
     
 
@@ -250,7 +159,7 @@ def main():
         if breed == "-":
             subbreed = input("Введите название подпороды: ").strip().lower()
             if not subbreed:
-                logging.error('Название подпороды не может быть пустым.')
+                logger.error('Название подпороды не может быть пустым.')
                 return None, None, None
         else:
             # получаем список подпород для введённой породы
@@ -258,7 +167,7 @@ def main():
             if breed in breeds_sub:
                 subbreeds = breeds_sub.get(breed, [])
             else:
-                logging.error(f"Порода '{breed}' не найдена")
+                logger.error(f"Порода '{breed}' не найдена")
                 return None, None, None
            
         return breed, subbreeds, subbreed
@@ -270,16 +179,16 @@ def main():
         yandex_disk_token = os.getenv("yandex_disk_token")
 
         if not yandex_disk_token:
-            logging.error(f"Токен не найден. Проверьте файл .env.")
+            logger.error(f"Токен не найден. Проверьте файл .env.")
             return None
         y_disk = YaDisk(token=yandex_disk_token)
         try:
             if not y_disk.check_token():
-                logging.error(f"Неверный токен диска.")
+                logger.error(f"Неверный токен диска.")
                 return None
             return y_disk
         except Exception as e:
-            logging.error(f"Ошибка при проверке токена: {e}")
+            logger.error(f"Ошибка при проверке токена: {e}")
             return None
 
     cnt = get_user_input_cnt()
@@ -297,7 +206,7 @@ def main():
     all_breeds = get_breeds()
     breed = resolve_breed_subbreed(subbreed, all_breeds) if subbreed else breed
     if not breed:
-        logging.error("Порода не найдена.")
+        logger.error("Порода не найдена.")
         return 
     
     proc_image(breed, subbreeds, subbreed, cnt, y_disk)
