@@ -23,12 +23,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 
 def clear_f():
-    """ Очищаем папки JSON"""
-    сhoice = input(f"Хотите очистить содержимое файла 'results.json'?\n"
+    """ Очищаем папку JSON"""
+    choice = input(f"Хотите очистить содержимое файла 'results.json'?\n"
                    f"Введите 'yes' для подтверждения, иначе Enter: "
                    ).strip().lower()
     
-    if сhoice == "yes":
+    if choice == "yes":
         # Очищаем JSON
         if os.path.exists(json_file): # проверяем сущ-ие указанного пути\
             with open(json_file, "w", encoding="utf-8") as f:
@@ -59,7 +59,7 @@ def get_image(breed: str, subbreed: str | None = None) -> list[str]:
     Args: 
         breed (str): Название породы.
         subbreed (str | None): Название подпороды.
-    Returns: list[str]: Список url-адресов изобрадений.
+    Returns: list[str]: Список url-адресов изображений.
     """ 
     images = []
     breeds_d = get_breeds()
@@ -187,7 +187,7 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
 def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> str | None:
     matching = [main_br for main_br, subbreeds in all_breeds.items() if subbreed in subbreeds]
     if not matching:
-        logging.error(f"Подпорода {subbreed} не найдена.")
+        logging.error(f"Под порода {subbreed} не найдена.")
         return None
     if len(matching) > 1:
         print("Найдены следующие подпороды:")
@@ -210,7 +210,7 @@ def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> s
 
 def main():
     """ 
-    Удалаем/очищаем папку 'images' и файл 'results.json в случае необходимости.
+    Удаляем/очищаем папку 'images' и файл 'results.json в случае необходимости.
     Получаем от пользователя кол-во изображений и название породы(подпороды).
     Проверяем наличие яндекс токена.
     Получаем список пород(подпород) с Api.
@@ -253,7 +253,7 @@ def main():
                 logging.error('Название подпороды не может быть пустым.')
                 return None, None, None
         else:
-            # получаем список подпород для введеной порды
+            # получаем список подпород для введённой породы
             breeds_sub = get_breeds()
             if breed in breeds_sub:
                 subbreeds = breeds_sub.get(breed, [])
