@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 
 def clear_f():
-    """ Очищаем папки JSON и Images """
+    """ Очищаем папки JSON"""
     сhoice = input(f"Хотите очистить содержимое файла 'results.json'?\n"
                    f"Введите 'yes' для подтверждения, иначе Enter: "
                    ).strip().lower()
