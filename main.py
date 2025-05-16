@@ -18,11 +18,32 @@ json_file = "results.json"
 setup_log()
 logger = get_log(__name__)
 
+
+def validation(input_data: str, 
+               filter=None, 
+               failure="Некорректный ввод. Повторите попытку.", 
+               allow_empty=False) -> str:
+    """Запрашивает у пользователя входные данные, то тех пор пока не будет введено нужное значение"""
+    while True: 
+        value = input(input_data).strip()
+        if not value:
+            if allow_empty:
+                return ""
+            else:
+                logger.warning(f"Значение не может быть пустым.")
+            continue
+        if filter is None or filter(value):
+            return value
+        else:
+            logger.warning(failure)
+
 def clear_f():
     """ Очищаем папку JSON"""
-    choice = input(f"Хотите очистить содержимое файла 'results.json'?\n"
-                   f"Введите 'yes' для подтверждения, иначе Enter: "
-                   ).strip().lower()
+    choice = validation("Очистить файл results.json? (yes/Enter): ",
+                        filter=lambda x: x.strip().lower() in ("", "yes"),
+                        failure="Введите yes или enter(для пропуска).",
+                        allow_empty=True
+                        ).strip().lower()
     
     if choice == "yes":
         # Очищаем JSON
@@ -32,6 +53,8 @@ def clear_f():
             logger.info(f"Файл '{json_file}' очищен.")
         else:
             logger.warning(f"Файл '{json_file}' не найден.") 
+    else:
+        logger.info(f"Очистка файла отменена.")
 
 
 def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
@@ -50,7 +73,7 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
         image_urls = get_image(main_breed, sub)
 
         if not image_urls:
-            logger.warning(f"Изображения для {bre} не найдены")
+            logger.warning(f"Изображения для {bre} не найдены.")
             continue
 
         if cnt:
@@ -65,8 +88,7 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
             ensure_remote_path_exists(y_disk, remote_dir)
         except Exception as e:
             if "existent directory" not in str(e):
-                logger.error(f"Ошибка создания папки {remote_dir}: {e}")
-
+                logger.error(f"Ошибка создания папки {remote_dir}: {e}.")
 
 
         for url in tqdm(image_urls, desc=f"Скачивание {bre}"):
@@ -103,7 +125,10 @@ def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> s
         print("Найдены следующие подпороды:")
         for i, el in enumerate(matching, start=1):
             print(f"{i}. {el}")
-        choice = input("Выберите номер породы(или введите '-' для случайного выбора): ").strip()
+        choice = validation(
+            "Выберите номер породы(или введите '-' для случайного выбора): ",
+            filter=lambda x: x.isdigit() and 1<= int(x) <= len(matching) or x.strip() == "-",
+            failure=f"Введите число от 1 до {len(matching)} или '-'.")
         if choice == '-':
             breed = random.choice(matching)
             logger.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
@@ -133,36 +158,64 @@ def main():
     clear_f()
 
     def get_user_input_cnt() -> int | None:
-        try:
-            cnt_input = input("Введите кол-во изображений для скачивания(или 'all' для всех): ").strip().lower()
-            if cnt_input == "all":
-                return None
-            
-            cnt = int(cnt_input)
-            if cnt <= 0:
-                logger.error("Количество изображений должно быть больше 0")
-                return None
-            
-            return cnt
+        def validator(valu):
+            try: 
+                num = int(valu)
+                if num <= 0:
+                    logger.warning(f"Количество изображений должно быть больше 0.")
+                    return False
+                return True
+            except ValueError:
+                if valu.lower() == "all":
+                    return True
+                else:
+                    return False
+
+        def cust_filter(value):
+            is_v = validator(value)
+            if not is_v and value.isdigit():
+                return False
+            return is_v
+
+        cnt_input = validation("Введите кол-во изображений для скачивания(или 'all' для всех): ", 
+                               filter=cust_filter,
+                               failure="Введите целое значение или 'all'.", 
+                               ).strip().lower()
         
-        except ValueError:
-            logger.error("Введено некорректное значение. Введите целое число или 'all'.")
+        if cnt_input == "all":
             return None
-    
+ 
+        return int(cnt_input)
+
 
     def get_users_breed_subreed() -> tuple[str | None, list[str] | None, str | None]:
+        """
+        Получает от пользователя название породы или подпороды.
+        Возвращает (breed, subbreeds, subbreed)
+        """
+        all_br = get_breeds()
 
-        breed = input("Введите название породы(или '-' если знаете только подпороду): ").strip().lower()
+        breed = validation(
+            "Введите название породы (или '-' если знаете только подпороду): ",
+            filter=lambda x: x.strip().lower() == "-" or x.strip().lower() in all_br,
+            failure="Порода не найдена. Повторите ввод или введите '-'.",
+            allow_empty=False
+        ).strip().lower()
         subbreed = None
         subbreeds = None
 
         if breed == "-":
-            subbreed = input("Введите название подпороды: ").strip().lower()
+            subbreed= validation(
+                "Введите название подпороды: ",
+                filter=lambda x: any(x in subs for subs in all_br.values()),
+                failure="Подпорода не найдена.",
+                allow_empty=False
+            ).strip().lower()
             if not subbreed:
                 logger.error('Название подпороды не может быть пустым.')
                 return None, None, None
         else:
-            # получаем список подпород для введённой породы
+            # Получаем список подпород для выбранной породы
             breeds_sub = get_breeds()
             if breed in breeds_sub:
                 subbreeds = breeds_sub.get(breed, [])
@@ -171,8 +224,7 @@ def main():
                 return None, None, None
            
         return breed, subbreeds, subbreed
-
-
+    
     def check_token() -> YaDisk | None:
 
         load_dotenv() # получаем переменную окружения 
