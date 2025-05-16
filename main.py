@@ -4,6 +4,9 @@ import random
 from tqdm import tqdm
 from yadisk import YaDisk
 
+from prompt_toolkit import prompt
+from prompt_toolkit.completion import WordCompleter
+
 from dotenv import load_dotenv
 from utils.downloader import get_breeds, get_image, download_image
 from utils.uploader import ensure_remote_path_exists, upload_on_disk
@@ -57,21 +60,64 @@ def clear_f():
         logger.info(f"Очистка файла отменена.")
 
 
+def build_remote_path(breed: str, subbreed: str | None) -> str:
+    """
+    Формирует путь для Яндекс.Диска на основе породы и подпороды.
+    """
+    remote_dir = f"/{breed}"
+    if subbreed:
+        remote_dir += f"/{subbreed}"
+    return remote_dir
+
+def create_remote_directory(y_disk: YaDisk, remote_dir: str):
+    """
+    Создаёт папку на Яндекс.Диске, если она ещё не существует.
+    """
+    try:
+        ensure_remote_path_exists(y_disk, remote_dir)
+    except Exception as e:
+        if "existent directory" not in str(e):
+            logger.error(f"Ошибка создания папки {remote_dir}: {e}")
+
+def process_image(url: str, breed: str) -> tuple | None:
+    """
+    Скачивает изображение по URL и возвращает имя файла и данные.
+    """
+    result = download_image(url, breed)
+    if result is None:
+        return None
+    file_name, image_data = result
+    return file_name, image_data
+
+def upload_single_image(y_disk: YaDisk, image_data, remote_path: str):
+    """
+    Загружает одно изображение на Яндекс.Диск.
+    """
+    image_data.seek(0)  # Перематываем поток в начало
+    upload_on_disk(y_disk, image_data, remote_path)
+
+def save_metadata(data: list[dict]):
+    """
+    Сохраняет список данных о файлах в JSON-файл.
+    """
+    with open(json_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+    logger.info(f"Обновлён файл JSON -> {json_file}")
+
 def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cnt: int | None, y_disk: YaDisk):
     
     res = []
-    
+
     if subbreed:
         breed_sub = [f"{breed}/{subbreed}"]
     else:
         breed_sub = [f"{breed}/{s}" for s in subbreeds] if subbreeds else [breed]
 
-    # Скачиваем изображения и сразу грузим на диск
     for bre in breed_sub:
         main_breed, *sub_part = bre.split("/")
         sub = sub_part[0] if sub_part else None
-        image_urls = get_image(main_breed, sub)
 
+        image_urls = get_image(main_breed, sub)
         if not image_urls:
             logger.warning(f"Изображения для {bre} не найдены.")
             continue
@@ -79,69 +125,75 @@ def proc_image(breed: str, subbreeds: list[str] | None, subbreed: str | None, cn
         if cnt:
             image_urls = image_urls[:cnt]
 
-
-        remote_dir = f"/{main_breed}"
-        if sub:
-            remote_dir += f"/{sub}"
-        # Создаём структуру папок на Яндекс.Диске
-        try:
-            ensure_remote_path_exists(y_disk, remote_dir)
-        except Exception as e:
-            if "existent directory" not in str(e):
-                logger.error(f"Ошибка создания папки {remote_dir}: {e}.")
-
+        remote_dir = build_remote_path(main_breed, sub)
+        create_remote_directory(y_disk, remote_dir)
 
         for url in tqdm(image_urls, desc=f"Скачивание {bre}"):
-            downloaded = download_image(url, main_breed)
+            downloaded = process_image(url, main_breed)
             if downloaded is None:
                 continue
 
             file_name, image_data = downloaded
             remote_path = f"{remote_dir}/{file_name}"
 
-            # Загружаем напрямую из памяти
-            image_data.seek(0)  # Важно! Перематываем поток в начало
-            upload_on_disk(y_disk, image_data, remote_path)
+            upload_single_image(y_disk, image_data, remote_path)
 
-            # Сохраняем информацию о файле
             res.append({
-                "file_name": file_name,
-                "breed": main_breed,
-                "subbreed": sub,
-                "url": url
-            })
+                 "file_name": file_name,
+                 "breed": main_breed,
+                 "subbreed": sub,
+                 "url": url
+             })
 
-    # Сохраняем метаданные в JSON
-    with open(json_file, "w", encoding="utf-8") as f:
-        json.dump(res, f, indent=4, ensure_ascii=False)
-    logger.info(f"Обновлен файл Json -> {json_file}")
+    save_metadata(res)
+
+
+def find_breeds_by_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> list[str]:
+    """
+    Возвращает список основных пород, в которых есть указанная подпорода.
+    """
+    return [main_breed for main_breed, subs in all_breeds.items() if subbreed in subs]
+
+def choose_breed_from_list(matching_breeds: list[str], subbreed: str) -> str | None:
+    """
+    Предлагает пользователю выбрать породу из списка, если найдено несколько вариантов.
+    """
+    print(f"Найдены следующие породы для подпороды '{subbreed}':")
+    for i, breed in enumerate(matching_breeds, start=1):
+        print(f"{i}. {breed}")
+
+    choice = validation(
+        "Выберите номер породы (или введите '-' для случайного выбора): ",
+        filter=lambda x: x.isdigit() and 1 <= int(x) <= len(matching_breeds) or x.strip() == "-",
+        failure=f"Введите число от 1 до {len(matching_breeds)} или '-'."
+    ).strip()
+
+    if choice == '-':
+        breed = random.choice(matching_breeds)
+        logger.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
+    elif choice.isdigit() and 1 <= int(choice) <= len(matching_breeds):
+        breed = matching_breeds[int(choice) - 1]
+        logger.info(f"Выбрана порода '{breed}' для подпороды '{subbreed}'.")
+    else:
+        logger.error("Ошибка выбора.")
+        return None
+
+    return breed
 
 def resolve_breed_subbreed(subbreed: str, all_breeds: dict[str, list[str]]) -> str | None:
-    matching = [main_br for main_br, subbreeds in all_breeds.items() if subbreed in subbreeds]
-    if not matching:
-        logger.error(f"Под порода {subbreed} не найдена.")
+    
+    matching_breeds = find_breeds_by_subbreed(subbreed, all_breeds)
+
+    if not matching_breeds:
+        logger.error(f"Подпорода '{subbreed}' не найдена.")
         return None
-    if len(matching) > 1:
-        print("Найдены следующие подпороды:")
-        for i, el in enumerate(matching, start=1):
-            print(f"{i}. {el}")
-        choice = validation(
-            "Выберите номер породы(или введите '-' для случайного выбора): ",
-            filter=lambda x: x.isdigit() and 1<= int(x) <= len(matching) or x.strip() == "-",
-            failure=f"Введите число от 1 до {len(matching)} или '-'.")
-        if choice == '-':
-            breed = random.choice(matching)
-            logger.info(f"Случайно выбрана порода '{breed}' для подпороды '{subbreed}'.")
-        elif choice.isdigit() and 1 <= int(choice) <= len(matching):
-            breed = matching[int(choice) - 1]
-            logger.info(f"Выбрана порода '{breed}' для подпороды '{subbreed}'.")
-        else:
-            logger.error('Ошибка выбора')
-            return None
+
+    if len(matching_breeds) > 1:
+        return choose_breed_from_list(matching_breeds, subbreed)
     else:
-        breed = matching[0]
-        logger.info(f"Подпорода '{subbreed}' найдена в породе '{breed}.")
-    return breed
+        breed = matching_breeds[0]
+        logger.info(f"Подпорода '{subbreed}' найдена в породе '{breed}'.")
+        return breed
 
 def main():
     """ 
@@ -244,8 +296,6 @@ def main():
             return None
 
     cnt = get_user_input_cnt()
-    if cnt is None:
-        return 
     
     breed, subbreeds, subbreed = get_users_breed_subreed()
     if not breed and not subbreed:
