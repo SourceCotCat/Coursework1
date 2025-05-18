@@ -252,22 +252,20 @@ def main():
         subbreed_completer = WordCompleter(subbreeds_list, ignore_case=True)
 
         while True:
-            # Запрашиваем породу или '-' для ввода подпороды
             breed_input = prompt(
                 f"Введите породу: \n'-' если знаете только подпороду \n'?' если необходима справка \n",
                 completer=breed_completer,
                 complete_while_typing=True
             ).strip().lower()
-            
+
             if breed_input == "?":
                 print("\nДоступные породы:")
                 for breed in sorted(breeds_list):
                     print(f" - {breed}")
-                print() 
+                print()
                 continue
 
-            if breed_input == "-":
-                # Режим ввода подпороды
+            elif breed_input == "-":
                 while True:
                     subbreed_input = prompt(
                         "Введите название подпороды: ",
@@ -291,13 +289,30 @@ def main():
                     return breed, None, subbreed_input
 
             else:
-                # Проверяем, является ли ввод корректной породой
+                # Проверяем корректность породы
                 if breed_input not in breeds_list:
                     logger.warning(f"Порода '{breed_input}' не найдена.")
                     continue
 
+                # Получаем список подпород
                 subbreeds = all_br.get(breed_input, [])
-                return breed_input, subbreeds, None
+
+                # Если есть подпороды — спрашиваем, какую использовать
+                if subbreeds:
+                    choice = validation(
+                        f"Хотите выбрать конкретную подпороду? ({', '.join(subbreeds)}) или введите 'all': ",
+                        filter=lambda x: x.strip().lower() in [s.lower() for s in subbreeds + ["all"]],
+                        failure=f"Введите одну из подпород или 'all'.",
+                        allow_empty=False
+                    ).strip().lower()
+
+                    if choice == "all":
+                        return breed_input, subbreeds, None
+                    else:
+                        return breed_input, None, choice
+                else:
+                    # Нет подпород — просто возвращаем породу
+                    return breed_input, None, None
     
     
     def check_token() -> YaDisk | None:
