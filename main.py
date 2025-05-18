@@ -268,10 +268,18 @@ def main():
             elif breed_input == "-":
                 while True:
                     subbreed_input = prompt(
-                        "Введите название подпороды: ",
+                        f"Введите подпороду: \n'?' если необходима справка\n",
                         completer=subbreed_completer,
                         complete_while_typing=True
                     ).strip().lower()
+
+
+                    if subbreed_input == "?":
+                        print("\nДоступные подпороды:")
+                        for subbreed in sorted(subbreeds_list):
+                            print(f" - {subbreed}")
+                        print()
+                        continue
 
                     if not subbreed_input:
                         logger.warning("Название подпороды не может быть пустым.")
