@@ -239,43 +239,66 @@ def main():
  
         return int(cnt_input)
 
-
     def get_users_breed_subreed() -> tuple[str | None, list[str] | None, str | None]:
         """
-        Получает от пользователя название породы или подпороды.
+        Получает от пользователя название породы или подпороды с автодополнением и повторным запросом при ошибке.
         Возвращает (breed, subbreeds, subbreed)
         """
         all_br = get_breeds()
+        breeds_list = list(all_br.keys())
+        subbreeds_list = list({sub for subs in all_br.values() for sub in subs})
 
-        breed = validation(
-            "Введите название породы (или '-' если знаете только подпороду): ",
-            filter=lambda x: x.strip().lower() == "-" or x.strip().lower() in all_br,
-            failure="Порода не найдена. Повторите ввод или введите '-'.",
-            allow_empty=False
-        ).strip().lower()
-        subbreed = None
-        subbreeds = None
+        breed_completer = WordCompleter(breeds_list, ignore_case=True)
+        subbreed_completer = WordCompleter(subbreeds_list, ignore_case=True)
 
-        if breed == "-":
-            subbreed= validation(
-                "Введите название подпороды: ",
-                filter=lambda x: any(x in subs for subs in all_br.values()),
-                failure="Подпорода не найдена.",
-                allow_empty=False
+        while True:
+            # Запрашиваем породу или '-' для ввода подпороды
+            breed_input = prompt(
+                f"Введите породу: \n'-' если знаете только подпороду \n'?' если необходима справка \n",
+                completer=breed_completer,
+                complete_while_typing=True
             ).strip().lower()
-            if not subbreed:
-                logger.error('Название подпороды не может быть пустым.')
-                return None, None, None
-        else:
-            # Получаем список подпород для выбранной породы
-            breeds_sub = get_breeds()
-            if breed in breeds_sub:
-                subbreeds = breeds_sub.get(breed, [])
+            
+            if breed_input == "?":
+                print("\nДоступные породы:")
+                for breed in sorted(breeds_list):
+                    print(f" - {breed}")
+                print() 
+                continue
+
+            if breed_input == "-":
+                # Режим ввода подпороды
+                while True:
+                    subbreed_input = prompt(
+                        "Введите название подпороды: ",
+                        completer=subbreed_completer,
+                        complete_while_typing=True
+                    ).strip().lower()
+
+                    if not subbreed_input:
+                        logger.warning("Название подпороды не может быть пустым.")
+                        continue
+
+                    if subbreed_input not in subbreeds_list:
+                        logger.warning(f"Подпорода '{subbreed_input}' не найдена.")
+                        continue
+
+                    breed = resolve_breed_subbreed(subbreed_input, all_br)
+                    if not breed:
+                        logger.error("Не удалось определить породу для этой подпороды.")
+                        continue
+
+                    return breed, None, subbreed_input
+
             else:
-                logger.error(f"Порода '{breed}' не найдена")
-                return None, None, None
-           
-        return breed, subbreeds, subbreed
+                # Проверяем, является ли ввод корректной породой
+                if breed_input not in breeds_list:
+                    logger.warning(f"Порода '{breed_input}' не найдена.")
+                    continue
+
+                subbreeds = all_br.get(breed_input, [])
+                return breed_input, subbreeds, None
+    
     
     def check_token() -> YaDisk | None:
 
@@ -305,12 +328,8 @@ def main():
     if not y_disk:
         return
 
-    all_breeds = get_breeds()
-    breed = resolve_breed_subbreed(subbreed, all_breeds) if subbreed else breed
-    if not breed:
-        logger.error("Порода не найдена.")
-        return 
-    
+    get_breeds()    
+
     proc_image(breed, subbreeds, subbreed, cnt, y_disk)
 
 if __name__ == "__main__":
