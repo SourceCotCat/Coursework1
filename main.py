@@ -273,7 +273,6 @@ def main():
                         complete_while_typing=True
                     ).strip().lower()
 
-
                     if subbreed_input == "?":
                         print("\nДоступные подпороды:")
                         for subbreed in sorted(subbreeds_list):
